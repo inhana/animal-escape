@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>동물들의 대탈주</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Jua&display=swap" rel="stylesheet" />
+  <style>
+    body, button, h1, p, div { font-family: 'Jua', sans-serif; -webkit-tap-highlight-color: transparent; }
+    canvas {
+      background-color: #A7F3D0;
+      background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><path d="M 10 10 C 20 20, 40 20, 50 10 S 70 0, 80 10 S 100 20, 100 20" stroke="%2368D391" fill="none" stroke-width="2"/><path d="M 0 50 C 10 40, 30 40, 40 50 S 60 60, 70 50 S 90 40, 100 50" stroke="%2368D391" fill="none" stroke-width="2"/></svg>');
+      background-size: 100px 100px;
+    }
+    .progress-bar-container { width: 80%; height: 20px; background-color: rgba(0,0,0,0.3); border-radius: 10px; overflow: hidden; border: 2px solid white; }
+    .progress-bar { height: 100%; background: linear-gradient(90deg, #68D391, #F6E05E); transition: width 0.1s linear; }
+    #joystick-container { position: absolute; bottom: 30px; right: 30px; width: 120px; height: 120px; background: rgba(0, 0, 0, 0.2); border: 2px solid rgba(255, 255, 255, 0.3); border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+    #joystick-handle { width: 60px; height: 60px; background: rgba(255, 255, 255, 0.4); border-radius: 50%; position: absolute; transition: transform 0.1s; }
+  </style>
+</head>
+<body class="bg-gray-800 text-white flex items-center justify-center min-h-screen m-0 p-0 overflow-hidden">
+  <div id="game-container" class="relative w-full h-full max-w-lg aspect-[9/16] bg-black shadow-2xl">
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- In-game UI -->
+    <div id="in-game-ui" class="absolute top-0 left-0 w-full p-4 hidden">
+      <div class="flex justify-between items-center text-black">
+        <div id="lives-ui" class="text-2xl bg-white/50 px-3 py-1 rounded-lg">❤️ <span id="lives">3</span></div>
+        <div id="stage-name-ui" class="text-2xl bg-white/50 px-3 py-1 rounded-lg"><span id="stage-name"></span></div>
+        <div id="survival-time-ui" class="text-2xl bg-white/50 px-3 py-1 rounded-lg hidden">시간: <span id="survival-time">0</span>s</div>
+      </div>
+      <div id="progress-bar-wrapper" class="progress-bar-container mx-auto mt-2">
+        <div id="time-progress" class="progress-bar" style="width: 100%"></div>
+      </div>
+    </div>
+
+    <!-- Main overlay -->
+    <div id="overlay" class="absolute inset-0 bg-black bg-opacity-60 flex flex-col items-center justify-center text-center p-4 z-10">
+      <h1 id="title" class="text-6xl font-extrabold text-yellow-300 mb-4">동물들의 대탈주</h1>
+      <p id="subtitle" class="text-xl mb-6">사육사가 되어 동물들을 피하세요!</p>
+      <div class="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-4">
+        <button id="storyModeButton" class="px-8 py-3 bg-blue-600 hover:bg-blue-700 rounded-full text-2xl font-bold shadow-lg">스토리 모드</button>
+        <button id="infiniteModeButton" class="px-8 py-3 bg-purple-600 hover:bg-purple-700 rounded-full text-2xl font-bold shadow-lg">무한 모드</button>
+      </div>
+      <div class="mt-3 flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-4">
+        <button id="helpButton" class="px-8 py-2 bg-gray-600 hover:bg-gray-700 rounded-full text-xl font-bold shadow-lg">게임 설명</button>
+        <button id="hallOfFameButton" class="px-8 py-2 bg-yellow-600 hover:bg-yellow-700 rounded-full text-xl font-bold shadow-lg">명예의 전당</button>
+        <button id="nextStageButton" class="px-8 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-full text-xl font-bold shadow-lg hidden">다음 구역</button>
+      </div>
+      <div id="end-game-buttons" class="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-4 hidden mt-4">
+        <button id="retryButton" class="px-8 py-3 bg-green-600 hover:bg-green-700 rounded-full text-2xl font-bold shadow-lg">스테이지 재시도</button>
+        <button id="restartButton" class="px-8 py-3 bg-blue-600 hover:bg-blue-700 rounded-full text-2xl font-bold shadow-lg">처음부터</button>
+      </div>
+    </div>
+
+    <!-- Character select -->
+    <div id="character-select-overlay" class="absolute inset-0 bg-black bg-opacity-80 flex-col items-center justify-center text-center p-6 z-20 hidden">
+      <h2 class="text-4xl font-bold text-yellow-300 mb-6">사육사 선택</h2>
+      <div id="character-grid" class="grid grid-cols-3 gap-4"></div>
+      <button id="backToMainButton" class="mt-8 px-10 py-3 bg-gray-500 hover:bg-gray-600 rounded-full text-xl font-bold shadow-lg">뒤로 가기</button>
+    </div>
+
+    <!-- Help -->
+    <div id="help-overlay" class="absolute inset-0 bg-black bg-opacity-80 flex-col items-center justify-center text-center p-6 z-20 hidden">
+      <h2 class="text-4xl font-bold text-yellow-300 mb-6">게임 설명</h2>
+      <div class="text-left max-w-sm space-y-3 text-lg">
+        <p>🧑‍🌾 <span class="font-bold">목표:</span> 탈출한 동물들을 피하며 각 구역에서 살아남으세요!</p>
+        <p>🕹️ <span class="font-bold">조작:</span> 조이스틱으로 사육사를 조종합니다.</p>
+        <p class="font-bold text-yellow-400 mt-4">아이템</p>
+        <p>🥅 <span class="font-bold">튼튼한 그물:</span> 5초간 충돌을 1회 막아줍니다.</p>
+        <p>💉 <span class="font-bold">마취총:</span> 화면의 모든 동물을 잠재웁니다.</p>
+        <p>🚙 <span class="font-bold">지프차:</span> 안전한 곳으로 즉시 이동합니다.</p>
+        <p>🍖 <span class="font-bold">먹이:</span> 5초간 모든 동물이 느려집니다.</p>
+      </div>
+      <button id="closeHelpButton" class="mt-8 px-10 py-3 bg-red-500 hover:bg-red-600 rounded-full text-xl font-bold shadow-lg">닫기</button>
+    </div>
+
+    <!-- Hall of Fame -->
+    <div id="hall-of-fame-overlay" class="absolute inset-0 bg-black bg-opacity-80 flex-col items-center justify-center text-center p-6 z-30 hidden">
+      <h2 class="text-4xl font-bold text-yellow-300 mb-6">명예의 전당</h2>
+      <div class="text-sm opacity-80 mb-2">상위 10개 기록</div>
+      <ul id="hall-of-fame-list" class="text-xl text-left max-w-sm space-y-2"></ul>
+      <button id="closeHallButton" class="mt-8 px-10 py-3 bg-red-500 hover:bg-red-600 rounded-full text-xl font-bold shadow-lg">닫기</button>
+    </div>
+
+    <div id="joystick-container" class="hidden">
+      <div id="joystick-handle"></div>
+    </div>
+  </div>
+
+  <!-- App script with Firebase integration -->
+  <script type="module">
+    /**************** Firebase ****************/
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+    import { getFirestore, collection, addDoc, getDocs, query, orderBy, limit, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyAuuLAVf-o1d9hgY_hOxIlKm83g_37iiHk",
+      authDomain: "jnjproject-cb6aa.firebaseapp.com",
+      projectId: "jnjproject-cb6aa",
+      storageBucket: "jnjproject-cb6aa.firebasestorage.app",
+      messagingSenderId: "69780962154",
+      appId: "1:69780962154:web:a79e61f9bfe37ed1040313",
+      measurementId: "G-Y7PHD695DL"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    /**************** DOM refs ****************/
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const overlay = document.getElementById('overlay');
+    const storyModeButton = document.getElementById('storyModeButton');
+    const infiniteModeButton = document.getElementById('infiniteModeButton');
+    const retryButton = document.getElementById('retryButton');
+    const restartButton = document.getElementById('restartButton');
+    const helpButton = document.getElementById('helpButton');
+    const helpOverlay = document.getElementById('help-overlay');
+    const closeHelpButton = document.getElementById('closeHelpButton');
+    const characterSelectOverlay = document.getElementById('character-select-overlay');
+    const characterGrid = document.getElementById('character-grid');
+    const backToMainButton = document.getElementById('backToMainButton');
+    const titleEl = document.getElementById('title');
+    const subtitleEl = document.getElementById('subtitle');
+    const inGameUI = document.getElementById('in-game-ui');
+    const livesUI = document.getElementById('lives-ui');
+    const livesEl = document.getElementById('lives');
+    const stageNameUI = document.getElementById('stage-name-ui');
+    const stageNameEl = document.getElementById('stage-name');
+    const survivalTimeUI = document.getElementById('survival-time-ui');
+    const survivalTimeEl = document.getElementById('survival-time');
+    const progressBarWrapper = document.getElementById('progress-bar-wrapper');
+    const timeProgressEl = document.getElementById('time-progress');
+    const joystickContainer = document.getElementById('joystick-container');
+    const joystickHandle = document.getElementById('joystick-handle');
+    const endGameButtons = document.getElementById('end-game-buttons');
+    const hallOfFameButton = document.getElementById('hallOfFameButton');
+    const hallOfFameOverlay = document.getElementById('hall-of-fame-overlay');
+    const hallOfFameList = document.getElementById('hall-of-fame-list');
+    const closeHallButton = document.getElementById('closeHallButton');
+    const nextStageButton = document.getElementById('nextStageButton');
+
+    /**************** Game state ****************/
+    let animationFrameId;
+    let player, animals, particles, lives, gameOver, currentStageIndex, items;
+    let stageTimer, stageDuration, lastTime, globalSpeedModifier, survivalTime;
+    let joystickInput = { x: 0, y: 0 };
+
+    const CHARACTERS = ['🧑\u200d🌾', '👩\u200d🌾', '👨\u200d🌾', '👮', '🚜'];
+    let selectedCharacter = CHARACTERS[0];
+    let currentGameMode = null; // 'story' | 'infinite'
+
+    gameOver = true;
+
+    const STAGES = [
+      { name: "1. 농장", duration: 20, spawnRate: 500, minSpeed: 1, maxSpeed: 2, animals: ['🐔','🐷','🐮','🐑'] },
+      { name: "2. 초원", duration: 20, spawnRate: 450, minSpeed: 1.2, maxSpeed: 2.5, animals: ['🦓','🦒','🐘','🦏'] },
+      { name: "3. 정글", duration: 25, spawnRate: 400, minSpeed: 1.5, maxSpeed: 3, animals: ['🐒','🐍','🐅','🦍'] },
+      { name: "4. 극지방", duration: 25, spawnRate: 380, minSpeed: 1.8, maxSpeed: 3.5, animals: ['🐧','🐻\u200d❄️','🦊','🦭'] },
+      { name: "5. 바다", duration: 30, spawnRate: 350, minSpeed: 2.0, maxSpeed: 4.0, animals: ['🐙','🐡','🦀','🐬'] },
+    ];
+    const ALL_ANIMALS = [...new Set(STAGES.flatMap(s => s.animals))];
+
+    function resizeCanvas() {
+      const container = document.getElementById('game-container');
+      canvas.width = container.clientWidth; canvas.height = container.clientHeight;
+    }
+
+    /**************** Classes ****************/
+    class Player {
+      constructor(x, y) { this.x = x; this.y = y; this.emoji = selectedCharacter; this.size = 40; this.angle = -Math.PI/2; this.speed = 4; this.shielded = false; }
+      draw() {
+        if (this.shielded) { ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI*2); ctx.fillStyle = 'rgba(59,130,246,0.4)'; ctx.fill(); ctx.strokeStyle='rgba(59,130,246,1)'; ctx.lineWidth=3; ctx.stroke(); }
+        ctx.save(); ctx.translate(this.x,this.y); ctx.rotate(this.angle); ctx.font = `${this.size}px serif`; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(this.emoji,0,0); ctx.restore();
+      }
+      update() {
+        this.x += joystickInput.x * this.speed; this.y += joystickInput.y * this.speed;
+        if (this.x - this.size/2 < 0) this.x = this.size/2;
+        if (this.x + this.size/2 > canvas.width) this.x = canvas.width - this.size/2;
+        if (this.y - this.size/2 < 0) this.y = this.size/2;
+        if (this.y + this.size/2 > canvas.height) this.y = canvas.height - this.size/2;
+        if (joystickInput.x !== 0 || joystickInput.y !== 0) this.angle = Math.atan2(joystickInput.y, joystickInput.x) + Math.PI/2;
+        this.draw();
+      }
+    }
+
+    class Animal {
+      constructor(x, y, emoji, velocity) { this.x = x; this.y = y; this.emoji = emoji; this.size = 25 + Math.random()*25; this.velocity = velocity; }
+      draw() { ctx.font = `${this.size}px serif`; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(this.emoji, this.x, this.y); }
+      update() { this.x += this.velocity.x * globalSpeedModifier; this.y += this.velocity.y * globalSpeedModifier; this.draw(); }
+    }
+
+    class Particle {
+      constructor(x,y){ this.x=x; this.y=y; this.size=Math.random()*5+2; this.color=`hsl(${Math.random()*60+100},100%,70%)`; this.velocity={x:(Math.random()-0.5)*4,y:(Math.random()-0.5)*4}; this.alpha=1; }
+      draw(){ ctx.save(); ctx.globalAlpha=this.alpha; ctx.fillStyle=this.color; ctx.beginPath(); ctx.arc(this.x,this.y,this.size,0,Math.PI*2); ctx.fill(); ctx.restore(); }
+      update(){ this.x+=this.velocity.x; this.y+=this.velocity.y; this.alpha-=0.02; this.draw(); }
+    }
+
+    class Item {
+      constructor(x,y,type){ this.x=x; this.y=y; this.type=type; this.emoji = type==='shield'?'🥅':(type==='bomb'?'💉':(type==='teleport'?'🚙':'🍖')); this.size=30; }
+      draw(){ ctx.font=`${this.size}px serif`; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(this.emoji,this.x,this.y); }
+      update(){ this.draw(); }
+    }
+
+    /**************** Game setup ****************/
+    function initGame(){
+      lives = 3; gameOver=false;
+      if(currentGameMode==='story'){ currentStageIndex=0; setupStage(); } else { setupInfiniteMode(); }
+    }
+
+    function retryCurrentStage(){ lives=3; gameOver=false; setupStage(); }
+
+    function setupStage(){
+      const stage = STAGES[currentStageIndex];
+      player = new Player(canvas.width/2, canvas.height-80);
+      animals=[]; particles=[]; items=[];
+      stageDuration = stage.duration*1000; stageTimer = stageDuration; lastTime=undefined; globalSpeedModifier=1;
+      stageNameUI.classList.remove('hidden'); livesUI.classList.remove('hidden'); progressBarWrapper.classList.remove('hidden'); survivalTimeUI.classList.add('hidden');
+      stageNameEl.textContent = stage.name; livesEl.textContent = lives;
+      inGameUI.classList.remove('hidden'); joystickContainer.classList.remove('hidden'); overlay.classList.add('hidden'); characterSelectOverlay.classList.add('hidden');
+      nextStageButton.classList.add('hidden');
+      startSpawning();
+      if(animationFrameId) cancelAnimationFrame(animationFrameId); animationFrameId = requestAnimationFrame(animate);
+    }
+
+    function setupInfiniteMode(){
+      player = new Player(canvas.width/2, canvas.height-80);
+      animals=[]; particles=[]; items=[]; lastTime=undefined; globalSpeedModifier=1; survivalTime=0;
+      livesEl.textContent = lives; stageNameUI.classList.add('hidden'); progressBarWrapper.classList.add('hidden'); survivalTimeUI.classList.remove('hidden'); livesUI.classList.remove('hidden'); inGameUI.classList.remove('hidden'); joystickContainer.classList.remove('hidden'); overlay.classList.add('hidden'); characterSelectOverlay.classList.add('hidden');
+      nextStageButton.classList.add('hidden');
+      startSpawning();
+      if(animationFrameId) cancelAnimationFrame(animationFrameId); animationFrameId = requestAnimationFrame(animate);
+    }
+
+    let spawnInterval, itemInterval;
+    function startSpawning(){
+      clearInterval(spawnInterval); clearInterval(itemInterval);
+      if(currentGameMode==='story'){ const stage = STAGES[currentStageIndex]; spawnInterval = setInterval(spawnAnimal, stage.spawnRate); }
+      else { spawnInterval = setInterval(spawnAnimal, 500); }
+      itemInterval = setInterval(spawnItem, 8000);
+    }
+
+    function spawnAnimal(){
+      if(gameOver || !player) return;
+      let emoji, speedMultiplier=1;
+      if(currentGameMode==='story'){ const stage = STAGES[currentStageIndex]; emoji = stage.animals[Math.floor(Math.random()*stage.animals.length)]; }
+      else { const animalIndex = Math.min(ALL_ANIMALS.length-1, Math.floor(survivalTime/10)); emoji = ALL_ANIMALS[Math.floor(Math.random()*(animalIndex+1))]; speedMultiplier = 1 + (survivalTime/60); }
+      let x,y; const edge = Math.floor(Math.random()*4);
+      if(edge===0){ x=Math.random()*canvas.width; y=-30; }
+      else if(edge===1){ x=canvas.width+30; y=Math.random()*canvas.height; }
+      else if(edge===2){ x=Math.random()*canvas.width; y=canvas.height+30; }
+      else { x=-30; y=Math.random()*canvas.height; }
+      const targetX = player.x + (Math.random()-0.5)*100; const targetY = player.y + (Math.random()-0.5)*100; const angle = Math.atan2(targetY-y, targetX-x); const speed = (Math.random()*1.5+1)*speedMultiplier; const velocity={x:Math.cos(angle)*speed, y:Math.sin(angle)*speed};
+      animals.push(new Animal(x,y,emoji,velocity));
+    }
+
+    function spawnItem(){ if(gameOver) return; const itemTypes=['shield','bomb','teleport','slowmo']; const type=itemTypes[Math.floor(Math.random()*itemTypes.length)]; const x=Math.random()*(canvas.width-60)+30; const y=Math.random()*(canvas.height-100)+50; items.push(new Item(x,y,type)); }
+
+    function animate(currentTime){
+      if(gameOver) return; animationFrameId = requestAnimationFrame(animate);
+      if(lastTime===undefined) lastTime=currentTime; const deltaTime = currentTime - lastTime; lastTime=currentTime;
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      player.update();
+      particles.forEach((p,i)=> p.alpha<=0 ? particles.splice(i,1) : p.update());
+      items.forEach((item,i)=>{ item.update(); const dist = Math.hypot(player.x-item.x, player.y-item.y); if(dist < player.size/2 + item.size/2){ activateItem(item.type); items.splice(i,1);} });
+      animals.forEach((a,i)=>{ a.update(); const dist = Math.hypot(player.x-a.x, player.y-a.y); if(dist < player.size/2 + a.size/2){ handleCollision(i); } });
+      if(currentGameMode==='story'){ stageTimer -= deltaTime; timeProgressEl.style.width = `${Math.max(0, stageTimer/stageDuration)*100}%`; if(stageTimer<=0) stageClear(); }
+      else { survivalTime += deltaTime/1000; survivalTimeEl.textContent = survivalTime.toFixed(1); }
+    }
+
+    function activateItem(type){
+      if(type==='shield'){ player.shielded=true; setTimeout(()=>{ player.shielded=false; }, 5000); }
+      else if(type==='bomb'){ animals.forEach(a=>{ for(let i=0;i<10;i++) particles.push(new Particle(a.x,a.y)); }); animals=[]; }
+      else if(type==='teleport'){ player.x = Math.random()*(canvas.width-100)+50; player.y = Math.random()*(canvas.height-100)+50; for(let i=0;i<30;i++) particles.push(new Particle(player.x,player.y)); }
+      else if(type==='slowmo'){ globalSpeedModifier=0.5; setTimeout(()=>{ globalSpeedModifier=1; }, 5000); }
+    }
+
+    function handleCollision(index){
+      if(player.shielded){ player.shielded=false; animals.splice(index,1); return; }
+      for(let i=0;i<20;i++) particles.push(new Particle(player.x,player.y)); animals.splice(index,1); lives--; livesEl.textContent=lives; if(lives<=0){ endGame("게임 오버!"); }
+    }
+
+    function stageClear(){
+      clearInterval(spawnInterval); clearInterval(itemInterval); currentStageIndex++;
+      cancelAnimationFrame(animationFrameId); animationFrameId=null;
+      if(currentStageIndex >= STAGES.length){ endGame("모든 동물원에서 살아남았습니다!"); return; }
+      titleEl.textContent = "구역 클리어!"; subtitleEl.textContent = `다음: ${STAGES[currentStageIndex].name}`;
+      overlay.classList.remove('hidden'); inGameUI.classList.add('hidden'); joystickContainer.classList.add('hidden'); nextStageButton.classList.remove('hidden');
+    }
+
+    /**************** Leaderboard (Firestore) ****************/
+    async function saveScore(name, score, mode){
+      try {
+        await addDoc(collection(db, 'hallOfFame'), { name, score, mode, createdAt: serverTimestamp() });
+      } catch(e){ console.error('Error adding score: ', e); }
+    }
+
+    async function loadHallOfFame(){
+      hallOfFameList.innerHTML = '<li class="opacity-80">불러오는 중...</li>';
+      try {
+        const q = query(collection(db,'hallOfFame'), orderBy('score','desc'), limit(10));
+        const snap = await getDocs(q);
+        hallOfFameList.innerHTML = '';
+        if(snap.empty){ hallOfFameList.innerHTML = '<li>기록이 없습니다.</li>'; return; }
+        snap.forEach(doc=>{
+          const d = doc.data();
+          const li = document.createElement('li');
+          li.textContent = `${d.name} - ${d.score}${d.mode==='infinite'?'초':''} ${d.mode?`(${d.mode})`:''}`;
+          hallOfFameList.appendChild(li);
+        });
+      } catch(e){ hallOfFameList.innerHTML = '<li>불러오기 실패</li>'; console.error(e); }
+    }
+
+    function promptAndSaveScore(finalScore){
+      const name = prompt('이름을 입력하세요:');
+      if(!name) return;
+      const mode = currentGameMode || 'unknown';
+      // 점수 스케일: 무한모드=생존초 단위, 스토리=클리어 스테이지 수
+      saveScore(name, mode==='infinite' ? Number(finalScore.toFixed(1)) : Number(finalScore), mode);
+    }
+
+    /**************** End game ****************/
+    function endGame(message){
+      gameOver = true; clearInterval(spawnInterval); clearInterval(itemInterval);
+      cancelAnimationFrame(animationFrameId); animationFrameId=null;
+      titleEl.textContent = message;
+      if(currentGameMode==='story'){
+        let finalStageName = STAGES[currentStageIndex] ? STAGES[currentStageIndex].name : STAGES[STAGES.length-1].name;
+        subtitleEl.textContent = `최종 생존 구역: ${finalStageName}`;
+        if(message !== '모든 동물원에서 살아남았습니다!'){ retryButton.classList.remove('hidden'); } else { retryButton.classList.add('hidden'); }
+        promptAndSaveScore(currentStageIndex); // 현재까지 도달한 스테이지 수 저장
+      } else {
+        subtitleEl.textContent = `최종 생존 시간: ${survivalTime.toFixed(1)}초`;
+        retryButton.classList.add('hidden');
+        promptAndSaveScore(survivalTime);
+      }
+      overlay.classList.remove('hidden'); inGameUI.classList.add('hidden'); joystickContainer.classList.add('hidden'); endGameButtons.classList.remove('hidden'); storyModeButton.classList.add('hidden'); infiniteModeButton.classList.add('hidden'); helpButton.classList.add('hidden'); nextStageButton.classList.add('hidden');
+    }
+
+    function showMainMenu(){
+      titleEl.textContent = '동물들의 대탈주'; subtitleEl.textContent = '사육사가 되어 동물들을 피하세요!';
+      overlay.classList.remove('hidden'); characterSelectOverlay.classList.add('hidden'); endGameButtons.classList.add('hidden'); storyModeButton.classList.remove('hidden'); infiniteModeButton.classList.remove('hidden'); helpButton.classList.remove('hidden'); nextStageButton.classList.add('hidden');
+    }
+
+    function populateCharacterSelect(){
+      characterGrid.innerHTML='';
+      CHARACTERS.forEach(char=>{ const btn=document.createElement('button'); btn.className='text-6xl p-4 bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors'; btn.textContent=char; btn.onclick=()=>{ selectedCharacter=char; initGame(); }; characterGrid.appendChild(btn); });
+    }
+
+    function showCharacterSelect(mode){ currentGameMode=mode; overlay.classList.add('hidden'); characterSelectOverlay.classList.remove('hidden'); characterSelectOverlay.classList.add('flex'); }
+
+    /**************** Events ****************/
+    storyModeButton.addEventListener('click', ()=> showCharacterSelect('story'));
+    infiniteModeButton.addEventListener('click', ()=> showCharacterSelect('infinite'));
+    retryButton.addEventListener('click', ()=>{ retryCurrentStage(); });
+    restartButton.addEventListener('click', ()=>{ showMainMenu(); });
+    helpButton.addEventListener('click', ()=>{ helpOverlay.classList.remove('hidden'); helpOverlay.classList.add('flex'); });
+    closeHelpButton.addEventListener('click', ()=>{ helpOverlay.classList.add('hidden'); helpOverlay.classList.remove('flex'); });
+    backToMainButton.addEventListener('click', ()=>{ showMainMenu(); });
+    hallOfFameButton.addEventListener('click', async ()=>{ await loadHallOfFame(); hallOfFameOverlay.classList.remove('hidden'); hallOfFameOverlay.classList.add('flex'); });
+    closeHallButton.addEventListener('click', ()=>{ hallOfFameOverlay.classList.add('hidden'); hallOfFameOverlay.classList.remove('flex'); });
+    nextStageButton.addEventListener('click', ()=>{ setupStage(); });
+
+    let joystickActive=false;
+    function handleJoystick(e){ e.preventDefault(); if(!joystickActive) return; const rect=joystickContainer.getBoundingClientRect(); const touch=e.touches[0]; let x=(touch.clientX-rect.left-rect.width/2); let y=(touch.clientY-rect.top-rect.height/2); const mag=Math.sqrt(x*x+y*y); if(mag>rect.width/4){ x=(x/mag)*(rect.width/4); y=(y/mag)*(rect.width/4); } joystickHandle.style.transform=`translate(${x}px, ${y}px)`; joystickInput={ x: x/(rect.width/4), y: y/(rect.width/4) }; }
+    joystickContainer.addEventListener('touchstart', e=>{ e.preventDefault(); joystickActive=true; }, {passive:false});
+    joystickContainer.addEventListener('touchmove', handleJoystick, {passive:false});
+    window.addEventListener('touchend', e=>{ joystickActive=false; joystickHandle.style.transform='translate(0, 0)'; joystickInput={x:0,y:0}; });
+
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+    populateCharacterSelect();
+  </script>
+</body>
+</html>
