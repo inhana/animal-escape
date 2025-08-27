@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>수박게임 - 최소구현</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    html,body{height:100%;}
+    body{margin:0; background:#0f172a; color:#e5e7eb; font-family:ui-sans-serif,system-ui;}
+    #stage{background:#0ea5e9;}
+  </style>
+</head>
+<body class="grid place-items-center p-4">
+  <div class="w-full max-w-md">
+    <div class="flex items-center justify-between mb-2">
+      <div class="text-xl font-bold">수박게임</div>
+      <div id="nextLabel" class="text-sm opacity-80">다음: <span id="nextEmoji">🍒</span></div>
+    </div>
+    <canvas id="stage" width="360" height="540" class="rounded-2xl shadow-xl"></canvas>
+    <div class="flex items-center justify-between mt-3">
+      <div class="text-sm">클릭/터치로 낙하. 같은 과일 충돌 시 합체.</div>
+      <button id="restartBtn" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">다시시작</button>
+    </div>
+  </div>
+
+  <div id="winOverlay" class="fixed inset-0 bg-black/60 hidden place-items-center">
+    <div class="bg-white text-black p-6 rounded-xl text-center w-80">
+      <div class="text-2xl font-bold mb-2">수박 완성!</div>
+      <p class="mb-4">승리했습니다 🎉</p>
+      <button id="playAgain" class="px-4 py-2 bg-emerald-600 text-white rounded">다시 플레이</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/matter-js@0.19.0/build/matter.min.js"></script>
+  <script>
+    const { Engine, Render, Runner, Bodies, Composite, Events, Body, Vector } = Matter;
+
+    // 과일 단계 정의
+    const FRUITS = [
+      { r: 12, emoji: '🍒' },
+      { r: 16, emoji: '🍓' },
+      { r: 20, emoji: '🍇' },
+      { r: 26, emoji: '🍊' },
+      { r: 32, emoji: '🍎' },
+      { r: 40, emoji: '🍍' },
+      { r: 52, emoji: '🍉' } // 최종 수박
+    ];
+    const MAX_LEVEL = FRUITS.length - 1;
+
+    // 엔진/렌더러
+    const W = 360, H = 540, WALL = 10;
+    const engine = Engine.create({ gravity: { x: 0, y: 1 } });
+    const canvas = document.getElementById('stage');
+    const render = Render.create({ engine, canvas, options: { width: W, height: H, wireframes: false, background: '#0ea5e9' } });
+    Render.run(render);
+    const runner = Runner.create();
+    Runner.run(runner, engine);
+
+    // 컨테이너 바닥/벽
+    const ground = Bodies.rectangle(W/2, H - WALL/2, W, WALL, { isStatic: true, render: { fillStyle: '#1e293b' } });
+    const leftWall = Bodies.rectangle(WALL/2, H/2, WALL, H, { isStatic: true, render: { fillStyle: '#1e293b' } });
+    const rightWall = Bodies.rectangle(W - WALL/2, H/2, WALL, H, { isStatic: true, render: { fillStyle: '#1e293b' } });
+    Composite.add(engine.world, [ground, leftWall, rightWall]);
+
+    // 그리기 훅: 이모지 그리기
+    const ctx = canvas.getContext('2d');
+    (function monkeyPatch() {
+      const _renderBody = render.bodiesRender || Render.bodies; // for compat
+    })();
+
+    // 과일 생성
+    let spawnX = W/2;
+    let canDrop = true;
+    let nextLevel = 0;
+
+    const nextEmoji = document.getElementById('nextEmoji');
+    const winOverlay = document.getElementById('winOverlay');
+    const playAgain = document.getElementById('playAgain');
+    const restartBtn = document.getElementById('restartBtn');
+
+    function randNextLevel() {
+      // 초반은 작은 과일 위주
+      const pool = [0,0,0,1,1,2,2,3];
+      return pool[(Math.random()*pool.length)|0];
+    }
+
+    function drawEmojis() {
+      const bodies = Composite.allBodies(engine.world);
+      ctx.save();
+      ctx.clearRect(0,0,W,H);
+      // 배경
+      ctx.fillStyle = '#0ea5e9';
+      ctx.fillRect(0,0,W,H);
+      // Matter.js가 충돌디버그를 그리지 않도록 렌더만 유지
+      // 이모지 렌더링
+      for (const b of bodies) {
+        if (b.isStatic || b.label !== 'fruit') continue;
+        const lev = b.plugin.level ?? 0;
+        const { emoji } = FRUITS[lev];
+        ctx.save();
+        ctx.translate(b.position.x, b.position.y);
+        ctx.rotate(b.angle);
+        ctx.font = `${FRUITS[lev].r*1.6}px serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(emoji, 0, 0);
+        ctx.restore();
+      }
+      // 상단 가이드
+      ctx.fillStyle = 'rgba(0,0,0,.15)';
+      ctx.fillRect(0, 80, W, 2);
+      // 프리뷰
+      ctx.font = '16px sans-serif';
+      ctx.fillStyle = '#000';
+      ctx.fillText('가이드 라인', 10, 74);
+      ctx.restore();
+      requestAnimationFrame(drawEmojis);
+    }
+
+    function spawnFruit(level, x) {
+      const r = FRUITS[level].r;
+      const fruit = Bodies.circle(x, 60, r, {
+        restitution: 0.2,
+        friction: 0.05,
+        density: 0.001,
+        label: 'fruit',
+        render: { fillStyle: '#ffffff00' }, // 투명. 커스텀 캔버스에 이모지 그림
+        plugin: { level }
+      });
+      Composite.add(engine.world, fruit);
+      return fruit;
+    }
+
+    function scheduleNext() {
+      nextLevel = randNextLevel();
+      nextEmoji.textContent = FRUITS[nextLevel].emoji;
+      canDrop = true;
+    }
+
+    function win() {
+      winOverlay.classList.remove('hidden');
+      winOverlay.classList.add('grid');
+    }
+
+    // 합체 처리
+    const toRemove = new Set();
+    Events.on(engine, 'collisionStart', function (evt) {
+      for (const pair of evt.pairs) {
+        const a = pair.bodyA, b = pair.bodyB;
+        if (a.label !== 'fruit' || b.label !== 'fruit') continue;
+        const la = a.plugin.level ?? -1;
+        const lb = b.plugin.level ?? -1;
+        if (la === lb && la >= 0 && la < MAX_LEVEL && !toRemove.has(a) && !toRemove.has(b)) {
+          // 합체 위치 = 두 중심의 평균
+          const pos = Vector.mult(Vector.add(a.position, b.position), 0.5);
+          toRemove.add(a); toRemove.add(b);
+          setTimeout(() => {
+            try { Composite.remove(engine.world, a); } catch {}
+            try { Composite.remove(engine.world, b); } catch {}
+            const merged = spawnFruit(la + 1, pos.x);
+            Body.setPosition(merged, pos);
+            // 즉시 약간의 임펄스로 겹침 방지
+            Body.applyForce(merged, merged.position, { x: 0, y: -0.001 });
+            if (la + 1 === MAX_LEVEL) win();
+          }, 0);
+        }
+      }
+    });
+
+    // 입력: 마우스/터치로 x 이동, 클릭 시 낙하
+    function clamp(v, min, max){ return Math.max(min, Math.min(max, v)); }
+    function updateSpawnX(clientX){
+      const rect = canvas.getBoundingClientRect();
+      spawnX = clamp(clientX - rect.left, 30, W-30);
+    }
+
+    canvas.addEventListener('mousemove', (e)=> updateSpawnX(e.clientX));
+    canvas.addEventListener('touchmove', (e)=> { if(e.touches[0]) updateSpawnX(e.touches[0].clientX); }, {passive:true});
+
+    function drop() {
+      if (!canDrop) return;
+      canDrop = false;
+      spawnFruit(nextLevel, spawnX);
+      scheduleNext();
+    }
+    canvas.addEventListener('click', drop);
+    canvas.addEventListener('touchend', drop);
+
+    function reset() {
+      // 모든 과일 제거
+      const bodies = Composite.allBodies(engine.world);
+      for (const b of bodies) if (b.label === 'fruit') Composite.remove(engine.world, b);
+      winOverlay.classList.add('hidden');
+      winOverlay.classList.remove('grid');
+      scheduleNext();
+    }
+
+    document.getElementById('playAgain').onclick = reset;
+    document.getElementById('restartBtn').onclick = reset;
+
+    scheduleNext();
+    drawEmojis();
+  </script>
+</body>
+</html>
