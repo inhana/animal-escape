@@ -8,7 +8,7 @@
   <style>
     html,body{height:100%;}
     body{margin:0; background:#0f172a; color:#e5e7eb; font-family:ui-sans-serif,system-ui;}
-    #stage{background:#0ea5e9;}
+    #stage{background:#0ea5e9; touch-action:none;}
   </style>
 </head>
 <body class="grid place-items-center p-4">
@@ -19,7 +19,7 @@
     </div>
     <canvas id="stage" width="360" height="540" class="rounded-2xl shadow-xl"></canvas>
     <div class="flex items-center justify-between mt-3">
-      <div class="text-sm">클릭/터치로 낙하. 같은 과일 충돌 시 합체.</div>
+      <div class="text-sm">포인터로 위치 지정 → 탭/클릭으로 낙하. 같은 과일 충돌 시 합체.</div>
       <button id="restartBtn" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">다시시작</button>
     </div>
   </div>
@@ -63,16 +63,15 @@
     const rightWall = Bodies.rectangle(W - WALL/2, H/2, WALL, H, { isStatic: true, render: { fillStyle: '#1e293b' } });
     Composite.add(engine.world, [ground, leftWall, rightWall]);
 
-    // 그리기 훅: 이모지 그리기
+    // 캔버스 드로잉 컨텍스트 (이모지 렌더)
     const ctx = canvas.getContext('2d');
-    (function monkeyPatch() {
-      const _renderBody = render.bodiesRender || Render.bodies; // for compat
-    })();
 
-    // 과일 생성
+    // 상태
     let spawnX = W/2;
+    let previewX = spawnX;
     let canDrop = true;
     let nextLevel = 0;
+    const cooldownMs = 250; // 더블 드랍 방지
 
     const nextEmoji = document.getElementById('nextEmoji');
     const winOverlay = document.getElementById('winOverlay');
@@ -85,37 +84,38 @@
       return pool[(Math.random()*pool.length)|0];
     }
 
-    function drawEmojis() {
+    function drawScene() {
       const bodies = Composite.allBodies(engine.world);
       ctx.save();
       ctx.clearRect(0,0,W,H);
       // 배경
       ctx.fillStyle = '#0ea5e9';
       ctx.fillRect(0,0,W,H);
-      // Matter.js가 충돌디버그를 그리지 않도록 렌더만 유지
-      // 이모지 렌더링
+      // 과일 이모지
       for (const b of bodies) {
         if (b.isStatic || b.label !== 'fruit') continue;
         const lev = b.plugin.level ?? 0;
-        const { emoji } = FRUITS[lev];
+        const { emoji, r } = FRUITS[lev];
         ctx.save();
         ctx.translate(b.position.x, b.position.y);
         ctx.rotate(b.angle);
-        ctx.font = `${FRUITS[lev].r*1.6}px serif`;
+        ctx.font = `${r*1.6}px serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(emoji, 0, 0);
         ctx.restore();
       }
-      // 상단 가이드
+      // 상단 가이드 및 프리뷰
       ctx.fillStyle = 'rgba(0,0,0,.15)';
       ctx.fillRect(0, 80, W, 2);
-      // 프리뷰
-      ctx.font = '16px sans-serif';
-      ctx.fillStyle = '#000';
-      ctx.fillText('가이드 라인', 10, 74);
+      const { emoji, r } = FRUITS[nextLevel];
+      ctx.font = `${r*1.6}px serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(emoji, previewX, 60);
+
       ctx.restore();
-      requestAnimationFrame(drawEmojis);
+      requestAnimationFrame(drawScene);
     }
 
     function spawnFruit(level, x) {
@@ -125,7 +125,7 @@
         friction: 0.05,
         density: 0.001,
         label: 'fruit',
-        render: { fillStyle: '#ffffff00' }, // 투명. 커스텀 캔버스에 이모지 그림
+        render: { fillStyle: '#ffffff00' },
         plugin: { level }
       });
       Composite.add(engine.world, fruit);
@@ -135,7 +135,8 @@
     function scheduleNext() {
       nextLevel = randNextLevel();
       nextEmoji.textContent = FRUITS[nextLevel].emoji;
-      canDrop = true;
+      // 약간의 쿨다운 후 투하 가능
+      setTimeout(()=>{ canDrop = true; }, cooldownMs);
     }
 
     function win() {
@@ -152,7 +153,6 @@
         const la = a.plugin.level ?? -1;
         const lb = b.plugin.level ?? -1;
         if (la === lb && la >= 0 && la < MAX_LEVEL && !toRemove.has(a) && !toRemove.has(b)) {
-          // 합체 위치 = 두 중심의 평균
           const pos = Vector.mult(Vector.add(a.position, b.position), 0.5);
           toRemove.add(a); toRemove.add(b);
           setTimeout(() => {
@@ -160,7 +160,6 @@
             try { Composite.remove(engine.world, b); } catch {}
             const merged = spawnFruit(la + 1, pos.x);
             Body.setPosition(merged, pos);
-            // 즉시 약간의 임펄스로 겹침 방지
             Body.applyForce(merged, merged.position, { x: 0, y: -0.001 });
             if (la + 1 === MAX_LEVEL) win();
           }, 0);
@@ -168,15 +167,21 @@
       }
     });
 
-    // 입력: 마우스/터치로 x 이동, 클릭 시 낙하
+    // 좌표 변환
     function clamp(v, min, max){ return Math.max(min, Math.min(max, v)); }
-    function updateSpawnX(clientX){
+    function updateSpawnXFromEvent(e){
       const rect = canvas.getBoundingClientRect();
-      spawnX = clamp(clientX - rect.left, 30, W-30);
+      const clientX = e.clientX ?? (e.touches && e.touches[0] && e.touches[0].clientX);
+      if (clientX == null) return;
+      const x = clientX - rect.left;
+      previewX = spawnX = clamp(x, 30, W-30);
     }
 
-    canvas.addEventListener('mousemove', (e)=> updateSpawnX(e.clientX));
-    canvas.addEventListener('touchmove', (e)=> { if(e.touches[0]) updateSpawnX(e.touches[0].clientX); }, {passive:true});
+    // Pointer 이벤트로 통일. click/touchend 중복 방지
+    let trackingPointer = false;
+    canvas.addEventListener('pointerdown', (e)=>{ e.preventDefault(); trackingPointer = true; updateSpawnXFromEvent(e); });
+    canvas.addEventListener('pointermove', (e)=>{ if(!trackingPointer) return; updateSpawnXFromEvent(e); });
+    window.addEventListener('pointerup', (e)=>{ if(!trackingPointer) return; trackingPointer = false; drop(); });
 
     function drop() {
       if (!canDrop) return;
@@ -184,23 +189,25 @@
       spawnFruit(nextLevel, spawnX);
       scheduleNext();
     }
-    canvas.addEventListener('click', drop);
-    canvas.addEventListener('touchend', drop);
 
     function reset() {
-      // 모든 과일 제거
       const bodies = Composite.allBodies(engine.world);
       for (const b of bodies) if (b.label === 'fruit') Composite.remove(engine.world, b);
       winOverlay.classList.add('hidden');
       winOverlay.classList.remove('grid');
+      previewX = spawnX = W/2;
+      nextLevel = 0;
+      nextEmoji.textContent = FRUITS[nextLevel].emoji;
+      canDrop = true;
       scheduleNext();
     }
 
     document.getElementById('playAgain').onclick = reset;
     document.getElementById('restartBtn').onclick = reset;
 
+    // 초기화
     scheduleNext();
-    drawEmojis();
+    drawScene();
   </script>
 </body>
 </html>
